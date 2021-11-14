@@ -88,8 +88,12 @@ int main(int argc, char** argv) {
 
     /* allocate memory for image */
     int* image = (int*)malloc(width * height * sizeof(int));
-    memset(image, 0, width * height * sizeof(int));
+    for(int i=0; i<width*height; i++) {
+        image[i] = 0;
+    }
     assert(image);
+    double Xoffset = (right - left) / width;
+    double Yoffset = (upper - lower) / height;
 
 #pragma omp parallel for schedule(dynamic) num_threads(num_thread) shared(iters, left, right, lower, upper, width, height)
         for(int rowUse=rank; rowUse<height; rowUse+=size) {
@@ -103,15 +107,17 @@ int main(int argc, char** argv) {
             __m128d x_square, y_square;
             __m128d NUM2;
 
+            
+
             // Initialize vec
             x[0] = 0;
             x[1] = 0;
-            y0[0] = rowUse * ((upper - lower) / height) + lower;
-            y0[1] = rowUse * ((upper - lower) / height) + lower;
-            x0[0] = rowPoint * ((right - left) / width) + left;
+            y0[0] = rowUse * Yoffset + lower;
+            y0[1] = rowUse * Yoffset + lower;
+            x0[0] = rowPoint * Xoffset + left;
             rem_point[0] = rowPoint;
             rowPoint += 1;
-            x0[1] = rowPoint * ((right - left) / width) + left;
+            x0[1] = rowPoint * Xoffset + left;
             rem_point[1] = rowPoint;
             rowPoint += 1;
             y[0] = 0;
@@ -138,7 +144,7 @@ int main(int argc, char** argv) {
                     // Draw image
                     image[rowUse * width + rem_point[0]] = repeats[0];
                     // reset value
-                    x0[0] = rowPoint * ((right - left) / width) + left;
+                    x0[0] = rowPoint * Xoffset + left;
                     rem_point[0] = rowPoint;
                     x[0] = 0;
                     y[0] = 0;
@@ -154,7 +160,7 @@ int main(int argc, char** argv) {
                     image[rowUse * width + rem_point[1]] = repeats[1];
                     
                     // reset value
-                    x0[1] = rowPoint * ((right - left) / width) + left;
+                    x0[1] = rowPoint * Xoffset + left;
                     rem_point[1] = rowPoint;
                     x[1] = 0;
                     y[1] = 0;

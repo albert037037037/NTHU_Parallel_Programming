@@ -10,6 +10,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <assert.h>
+#include <chrono>
 
 pthread_mutex_t mutex_use;
 pthread_mutex_t mutex_image;
@@ -86,11 +87,14 @@ void* cal_mandelbrot(void* void_data) {
                 int repeats = 0;
                 double x = 0;
                 double y = 0;
+                double x_square = 0;
+                double y_square = 0;
                 double length_squared = 0;
                 while (repeats < data->iters && length_squared < 4) {
-                    double temp = x * x - y * y + x0;
                     y = 2 * x * y + y0;
-                    x = temp;
+                    x = x_square-y_square+x0;
+                    x_square = x*x;
+                    y_square = y*y;
                     length_squared = x * x + y * y;
                     ++repeats;
                 }
@@ -104,11 +108,14 @@ void* cal_mandelbrot(void* void_data) {
                 int repeats = 0;
                 double x = 0;
                 double y = 0;
+                double x_square = 0;
+                double y_square = 0;
                 double length_squared = 0;
                 while (repeats < data->iters && length_squared < 4) {
-                    double temp = x * x - y * y + x0;
                     y = 2 * x * y + y0;
-                    x = temp;
+                    x = x_square-y_square+x0;
+                    x_square = x*x;
+                    y_square = y*y;
                     length_squared = x * x + y * y;
                     ++repeats;
                 }
@@ -120,11 +127,14 @@ void* cal_mandelbrot(void* void_data) {
                 int repeats = 0;
                 double x = 0;
                 double y = 0;
+                double x_square = 0;
+                double y_square = 0;
                 double length_squared = 0;
                 while (repeats < data->iters && length_squared < 4) {
-                    double temp = x * x - y * y + x0;
                     y = 2 * x * y + y0;
-                    x = temp;
+                    x = x_square-y_square+x0;
+                    x_square = x*x;
+                    y_square = y*y;
                     length_squared = x * x + y * y;
                     ++repeats;
                 }
@@ -172,6 +182,8 @@ int main(int argc, char** argv) {
     pthread_mutex_init (&(mutex_use), NULL);
     pthread_mutex_init (&(mutex_image), NULL);
     int t;
+    std::chrono::steady_clock::time_point t1, t2;
+    t1 = std::chrono::steady_clock::now();
     for (t = 0; t < num_threads; t++) {
         ID[t] = t;
         pthread_create(&threads[t], NULL, cal_mandelbrot, (void*)data);
@@ -179,6 +191,8 @@ int main(int argc, char** argv) {
     for (int i=0; i<num_threads; i++) {
 		pthread_join(threads[i], NULL);
 	}
+    t2 = std::chrono::steady_clock::now();
+    printf("Compute %ld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
     // for(int i=0; i<height; i++) {
     //     for(int j=0; j<width; j++) {
     //         printf("%d ", image[i*width+j]);

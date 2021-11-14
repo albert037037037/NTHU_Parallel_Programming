@@ -65,7 +65,7 @@ void write_png(const char* filename, int iters, int width, int height, const int
 void* mandelbrot(void* void_data) {
     myData* data = (myData*) void_data;
 
-    while(*(data->now_use) < data->height) {
+    while(1) {
         int rowUse;
 
         // Get the work batch
@@ -74,24 +74,28 @@ void* mandelbrot(void* void_data) {
         *(data->now_use) += 1;
         pthread_mutex_unlock(&mutex_use);
 
+        if(rowUse >= data->height) break;
+
         bool done[2] = {false, false};
-        int repeats[2] = {0, 0};
+        int repeats[2] = {0,0};
         int rem_point[2] = {0, 0};
         int rowPoint = 0;
         __m128d x, y, x0, y0;
         __m128d length_squared;
         __m128d x_square, y_square;
         __m128d NUM2;
+        double range = (data->right - data->left) / data->width;
+
 
         // Initialize vec
         x[0] = 0;
         x[1] = 0;
         y0[0] = rowUse * ((data->upper - data->lower) / data->height) + data->lower;
         y0[1] = rowUse * ((data->upper - data->lower) / data->height) + data->lower;
-        x0[0] = rowPoint * ((data->right - data->left) / data->width) + data->left;
+        x0[0] = rowPoint * range + data->left;
         rem_point[0] = rowPoint;
         rowPoint += 1;
-        x0[1] = rowPoint * ((data->right - data->left) / data->width) + data->left;
+        x0[1] = rowPoint * range + data->left;
         rem_point[1] = rowPoint;
         rowPoint += 1;
         y[0] = 0;
@@ -116,9 +120,12 @@ void* mandelbrot(void* void_data) {
 
             if( (length_squared[0] >= 4.0 || repeats[0] >= data->iters) && !done[0]) { 
                 // Draw image
+                // if(rowUse > 1647) {
+                //     printf("RowUse0 = %drem_point0 = %d\n", rowUse, rem_point[1]);
+                // }
                 image[rowUse * data->width + rem_point[0]] = repeats[0];
                 // reset value
-                x0[0] = rowPoint * ((data->right - data->left) / data->width) + data->left;
+                x0[0] = rowPoint * range + data->left;
                 rem_point[0] = rowPoint;
                 x[0] = 0;
                 y[0] = 0;
@@ -131,10 +138,13 @@ void* mandelbrot(void* void_data) {
             }
             if( (length_squared[1] >= 4.0 || repeats[1] >= data->iters) && !done[1]) { 
                 // Draw image
+                // if(rowUse > 1647) {
+                //     printf("RowUse1 = %drem_point1 = %d\n", rowUse, rem_point[1]);
+                // }
                 image[rowUse * data->width + rem_point[1]] = repeats[1];
                 
                 // reset value
-                x0[1] = rowPoint * ((data->right - data->left) / data->width) + data->left;
+                x0[1] = rowPoint * range + data->left;
                 rem_point[1] = rowPoint;
                 x[1] = 0;
                 y[1] = 0;
@@ -166,7 +176,7 @@ void* mandelbrot(void* void_data) {
             }
             image[rowUse * data->width + rem_point[0]] = no_vec_repeats;
         }
-        else if(!done[1]) {
+        if(!done[1]) {
             int no_vec_repeats = repeats[1];
             double no_vec_y0 = y0[1];
             double no_vec_x0 = x0[1];
@@ -186,7 +196,7 @@ void* mandelbrot(void* void_data) {
             image[rowUse * data->width + rem_point[1]] = no_vec_repeats;
         }
     }
-    return NULL;
+    pthread_exit(NULL);
 }
 
 int main(int argc, char** argv) {
@@ -240,4 +250,6 @@ int main(int argc, char** argv) {
     pthread_mutex_destroy(&(mutex_use));
     pthread_mutex_destroy(&(mutex_image));
     free(image);
+    free(data->now_use);
+    free(data);
 }

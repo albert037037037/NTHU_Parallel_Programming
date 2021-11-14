@@ -64,9 +64,11 @@ void write_png(const char* filename, int iters, int width, int height, const int
 }
 
 void* mandelbrot(void* void_data) {
+    std::chrono::steady_clock::time_point t1, t2;
+    t1 = std::chrono::steady_clock::now();
     myData* data = (myData*) void_data;
 
-    while(*(data->now_use) < data->height) {
+    while(1) {
         int rowUse;
 
         // Get the work batch
@@ -74,6 +76,8 @@ void* mandelbrot(void* void_data) {
         rowUse = *(data->now_use);
         *(data->now_use) += 1;
         pthread_mutex_unlock(&mutex_use);
+
+        if(rowUse >= data->height) break;
 
         bool done[2] = {false, false};
         int repeats[2] = {0, 0};
@@ -83,16 +87,18 @@ void* mandelbrot(void* void_data) {
         __m128d length_squared;
         __m128d x_square, y_square;
         __m128d NUM2;
+        double range = (data->right - data->left) / data->width;
+
 
         // Initialize vec
         x[0] = 0;
         x[1] = 0;
         y0[0] = rowUse * ((data->upper - data->lower) / data->height) + data->lower;
         y0[1] = rowUse * ((data->upper - data->lower) / data->height) + data->lower;
-        x0[0] = rowPoint * ((data->right - data->left) / data->width) + data->left;
+        x0[0] = rowPoint * range + data->left;
         rem_point[0] = rowPoint;
         rowPoint += 1;
-        x0[1] = rowPoint * ((data->right - data->left) / data->width) + data->left;
+        x0[1] = rowPoint * range + data->left;
         rem_point[1] = rowPoint;
         rowPoint += 1;
         y[0] = 0;
@@ -117,9 +123,12 @@ void* mandelbrot(void* void_data) {
 
             if( (length_squared[0] >= 4.0 || repeats[0] >= data->iters) && !done[0]) { 
                 // Draw image
+                // if(rowUse > 1647) {
+                //     printf("RowUse0 = %drem_point0 = %d\n", rowUse, rem_point[1]);
+                // }
                 image[rowUse * data->width + rem_point[0]] = repeats[0];
                 // reset value
-                x0[0] = rowPoint * ((data->right - data->left) / data->width) + data->left;
+                x0[0] = rowPoint * range + data->left;
                 rem_point[0] = rowPoint;
                 x[0] = 0;
                 y[0] = 0;
@@ -132,10 +141,13 @@ void* mandelbrot(void* void_data) {
             }
             if( (length_squared[1] >= 4.0 || repeats[1] >= data->iters) && !done[1]) { 
                 // Draw image
+                // if(rowUse > 1647) {
+                //     printf("RowUse1 = %drem_point1 = %d\n", rowUse, rem_point[1]);
+                // }
                 image[rowUse * data->width + rem_point[1]] = repeats[1];
                 
                 // reset value
-                x0[1] = rowPoint * ((data->right - data->left) / data->width) + data->left;
+                x0[1] = rowPoint * range + data->left;
                 rem_point[1] = rowPoint;
                 x[1] = 0;
                 y[1] = 0;
@@ -167,7 +179,7 @@ void* mandelbrot(void* void_data) {
             }
             image[rowUse * data->width + rem_point[0]] = no_vec_repeats;
         }
-        else if(!done[1]) {
+        if(!done[1]) {
             int no_vec_repeats = repeats[1];
             double no_vec_y0 = y0[1];
             double no_vec_x0 = x0[1];
@@ -187,7 +199,9 @@ void* mandelbrot(void* void_data) {
             image[rowUse * data->width + rem_point[1]] = no_vec_repeats;
         }
     }
-    return NULL;
+    t2 = std::chrono::steady_clock::now();
+    printf("I finish my work in %ld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
+    pthread_exit(NULL);
 }
 
 int main(int argc, char** argv) {
@@ -196,7 +210,7 @@ int main(int argc, char** argv) {
     cpu_set_t cpu_set;
     sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
     num_threads = CPU_COUNT(&cpu_set);
-    printf("%d cpus available\n", CPU_COUNT(&cpu_set));
+    // printf("%d cpus available\n", CPU_COUNT(&cpu_set));
     pthread_t threads[num_threads];
     int ID[num_threads];
 
@@ -205,7 +219,7 @@ int main(int argc, char** argv) {
 
     /* argument parsing */
     assert(argc == 9);
-    t1 = std::chrono::steady_clock::now();
+    
     const char* filename = argv[1];
     int iters = strtol(argv[2], 0, 10);
     double left = strtod(argv[3], 0);
@@ -231,6 +245,7 @@ int main(int argc, char** argv) {
     pthread_mutex_init (&(mutex_use), NULL);
     pthread_mutex_init (&(mutex_image), NULL);
     int t;
+    t1 = std::chrono::steady_clock::now();
     for (t = 0; t < num_threads; t++) {
         ID[t] = t;
         pthread_create(&threads[t], NULL, mandelbrot, (void*)data);
@@ -239,14 +254,16 @@ int main(int argc, char** argv) {
 		pthread_join(threads[i], NULL);
 	}
     t2 = std::chrono::steady_clock::now();
-    printf("Compute %ld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
+    // printf("Compute %ld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
 
     /* draw and cleanup */
     t1 = std::chrono::steady_clock::now();
     write_png(filename, iters, width, height, image);
     t2 = std::chrono::steady_clock::now();
-    printf("IO %ld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
+    // printf("IO %ld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
     pthread_mutex_destroy(&(mutex_use));
     pthread_mutex_destroy(&(mutex_image));
     free(image);
+    free(data->now_use);
+    free(data);
 }

@@ -204,17 +204,46 @@ int main(int argc, char** argv) {
 
     t2 = std::chrono::steady_clock::now();
     long int compute_time = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
-    long int sumCommunicate = 0;
-    MPI_Reduce(&compute_time, &sumCommunicate, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    long int sum_Compute[4];
+    for(int i=0; i<4; i++) {
+        sum_Compute[i] = 0;
+    }
+    long int sumCompute=0;
+    if(rank!=0) {
+        MPI_Send( &compute_time , 1 , MPI_LONG , 0 , 0 , MPI_COMM_WORLD);
+    }
+    else {
+        sum_Compute[0] = compute_time;
+        MPI_Recv( &sum_Compute[1] , 1 , MPI_LONG , 1 , 0 , MPI_COMM_WORLD , MPI_STATUS_IGNORE);
+        MPI_Recv( &sum_Compute[2] , 1 , MPI_LONG , 2 , 0 , MPI_COMM_WORLD , MPI_STATUS_IGNORE);
+        MPI_Recv( &sum_Compute[3] , 1 , MPI_LONG , 3 , 0 , MPI_COMM_WORLD , MPI_STATUS_IGNORE);
+        printf("Compute time of process 0 = %ld\n", sum_Compute[0]);
+        printf("Compute time of process 1 = %ld\n", sum_Compute[1]);
+        printf("Compute time of process 2 = %ld\n", sum_Compute[2]);
+        printf("Compute time of process 3 = %ld\n", sum_Compute[3]);
+    }
+
+
+
+
+    MPI_Reduce(&compute_time, &sumCompute, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if(rank == 0) {
-        double avgCommunicate = double(sumCommunicate) / (double)size;
-        printf("Compute %.2lf ms.\n", avgCommunicate);
+        double avgCompute = double(sumCompute) / (double)size;
+        printf("Compute %.2lf ms.\n", avgCompute);
     }
     t1 = std::chrono::steady_clock::now();
+    
     if(rank == 0) MPI_Reduce(MPI_IN_PLACE, image, width*height, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);  
     else MPI_Reduce(image, NULL, width*height, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
     t2 = std::chrono::steady_clock::now();
-    printf("Communicate %ld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
+    long int communicate_time = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+    long int sumCommunicate = 0;
+    
+    MPI_Reduce(&communicate_time, &sumCommunicate, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if(rank == 0) {
+        double avgCommunicate = double(sumCommunicate) / (double)size;
+        printf("Communicate %.2lf ms.\n", avgCommunicate);
+    }
     /* draw and cleanup */
     if(rank == 0) {
         t1 = std::chrono::steady_clock::now();

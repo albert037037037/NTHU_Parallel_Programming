@@ -10,6 +10,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <assert.h>
+#include <chrono>
 
 #define BATCH_SIZE 300
 
@@ -101,30 +102,6 @@ void* mandelbrot(void* void_data) {
             int repeat = cal_mandelbrot(data->iters, x0, y0);
             image[rowUse * data->width + i] = repeat;
         }
-
-
-        // if(starti == endi) {
-        //     y0 = starti * ((data->upper - data->lower) / data->height) + data->lower;
-        //     for(int j=startj; j<endj; j++) {
-        //         x0 = j * ((data->right - data->left) / data->width) + data->left;
-        //         int repeat = cal_mandelbrot(data->iters, x0, y0);
-        //         image[starti * data->width + j] = repeat;
-        //     }
-        // }
-        // else {
-        //     y0 = starti * ((data->upper - data->lower) / data->height) + data->lower;
-        //     for(int j=startj; j<data->width; j++) {
-        //         x0 = j * ((data->right - data->left) / data->width) + data->left;
-        //         int repeat = cal_mandelbrot(data->iters, x0, y0);
-        //         image[starti * data->width + j] = repeat;
-        //     }
-        //     y0 = endi * ((data->upper - data->lower) / data->height) + data->lower;
-        //     for(int j=0; j<endj; j++) {
-        //         x0 = j * ((data->right - data->left) / data->width) + data->left;
-        //         int repeat = cal_mandelbrot(data->iters, x0, y0);
-        //         image[endi * data->width + j] = repeat;
-        //     }
-        // }
     }
     return NULL;
 }
@@ -166,6 +143,8 @@ int main(int argc, char** argv) {
     pthread_mutex_init (&(mutex_use), NULL);
     pthread_mutex_init (&(mutex_image), NULL);
     int t;
+    std::chrono::steady_clock::time_point t1, t2;
+    t1 = std::chrono::steady_clock::now();
     for (t = 0; t < num_threads; t++) {
         ID[t] = t;
         pthread_create(&threads[t], NULL, mandelbrot, (void*)data);
@@ -173,6 +152,8 @@ int main(int argc, char** argv) {
     for (int i=0; i<num_threads; i++) {
 		pthread_join(threads[i], NULL);
 	}
+    t2 = std::chrono::steady_clock::now();
+    printf("Compute %ld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
     // for(int i=0; i<height; i++) {
     //     for(int j=0; j<width; j++) {
     //         printf("%d ", image[i*width+j]);
