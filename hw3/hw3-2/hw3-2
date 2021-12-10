@@ -1,0 +1,331 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#define floydWarshallBlockSize 64
+
+const int INF = ((1 << 30) - 1);
+void input(char* inFileName);
+void output(char* outFileName);
+
+void block_FW();
+int ceil(int a, int b);
+void cal(int B, int Round, int block_start_x, int block_start_y, int block_width, int block_height);
+
+int n, m;
+int padN;
+int* Dist;
+
+int main(int argc, char* argv[]) {
+    input(argv[1]);
+    block_FW();
+    output(argv[2]);
+    return 0;
+}
+
+void input(char* infile) {
+    FILE* file = fopen(infile, "rb");
+    fread(&n, sizeof(int), 1, file);
+    fread(&m, sizeof(int), 1, file);
+    printf("vertice = %d\n", n);
+    int pad = n % floydWarshallBlockSize;
+    padN = n + (floydWarshallBlockSize - pad);
+    Dist = (int*) malloc(sizeof(int)*padN*padN);
+    for (int i = 0; i < padN; ++i) {
+        for (int j = 0; j < padN; ++j) {
+            if (i == j) {
+                Dist[i*padN+j] = 0;
+            } else {
+                Dist[i*padN+j] = INF;
+            }
+        }
+    }
+
+    int pair[3];
+    for (int i = 0; i < m; ++i) {
+        fread(pair, sizeof(int), 3, file);
+        Dist[pair[0]*padN+pair[1]]= pair[2];
+    }
+    fclose(file);
+}
+
+void output(char* outFileName) {
+    FILE* outfile = fopen(outFileName, "w");
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            if (Dist[i*padN+j] >= INF) Dist[i*padN+j] = INF;
+        }
+        fwrite(&Dist[i*padN], sizeof(int), n, outfile);
+    }
+    fclose(outfile);
+}
+
+__global__ void blockedASAPPhase1(int round, int* graph, int V, int blockSize) {
+    __shared__ int shareDistInBlock[64*64];
+    int getBlockSize = blockSize;
+    int x = 2 * threadIdx.x;
+    int y = 2 * threadIdx.y;
+    int i = getBlockSize * round + y;
+    int j = getBlockSize * round + x;
+    shareDistInBlock[y * getBlockSize + x] = graph[i*V+j];
+    shareDistInBlock[y * getBlockSize + x+1] = graph[i*V+j+1];
+    shareDistInBlock[ (y+1) * getBlockSize + x] = graph[(i+1)*V+j];
+    shareDistInBlock[ (y+1) * getBlockSize + x+1] = graph[(i+1)*V+j+1]; 
+    
+    __syncthreads();
+    for(int k = 0; k<getBlockSize; k++) {
+        shareDistInBlock[y * getBlockSize + x] = min(shareDistInBlock[y * getBlockSize + x], shareDistInBlock[y*getBlockSize + k] + shareDistInBlock[k*getBlockSize + x]);
+        shareDistInBlock[y * getBlockSize + x+1] = min(shareDistInBlock[y * getBlockSize + x+1], shareDistInBlock[y*getBlockSize + k] + shareDistInBlock[k*getBlockSize + x+1]);
+        shareDistInBlock[(y+1) * getBlockSize + x] = min(shareDistInBlock[(y+1)* getBlockSize + x], shareDistInBlock[(y+1)*getBlockSize + k] + shareDistInBlock[k*getBlockSize + x]);
+        shareDistInBlock[(y+1) * getBlockSize + x+1] = min(shareDistInBlock[(y+1) * getBlockSize + x+1], shareDistInBlock[(y+1)*getBlockSize + k] + shareDistInBlock[k*getBlockSize + x+1]);
+        // if(shareDistInBlock[threadIdx.x * getBlockSize + threadIdx.y] > shareDistInBlock[threadIdx.x*getBlockSize + k] + shareDistInBlock[k*getBlockSize + threadIdx.y]){
+        //     shareDistInBlock[threadIdx.x * getBlockSize + threadIdx.y] = shareDistInBlock[threadIdx.x*getBlockSize + k] + shareDistInBlock[k*getBlockSize + threadIdx.y];
+        // }
+        __syncthreads();
+    }
+    
+    graph[i*V+j] = shareDistInBlock[y*getBlockSize+x];
+    graph[i*V+j+1] = shareDistInBlock[y*getBlockSize+x+1];
+    graph[(i+1)*V+j] = shareDistInBlock[(y+1)*getBlockSize+x];
+    graph[(i+1)*V+j+1] = shareDistInBlock[(y+1)*getBlockSize+x+1];
+    //  printf("Phase1\n");
+    // if(threadIdx.x==0 && threadIdx.y == 0){
+    //     printf("Round = %d\n", round);
+    //     for(int i=0; i<5; i++) {
+    //         for(int j=0; j<5; j++) {
+    //             printf("%d ", graph[i*V+j]);
+    //         }
+    //         printf("\n");
+    //     }
+    // }
+    // printf("\n");
+}
+
+// __global__ void blockedASAPPhase2Row(int round, int* graph, int V, int blockSize) {
+//     if(blockIdx.x != round) {
+//         __shared__ int shareDistInBlockPivot[32*32];
+//         __shared__ int shareDistInBlockOther[32*32];
+//         int getBlockSize = blockSize;
+//         int pivotI = getBlockSize * round + threadIdx.x;
+//         int pivotJ = getBlockSize * round + threadIdx.y;
+//         int targetI = pivotI;
+//         int targetJ = blockIdx.x * getBlockSize + threadIdx.y;
+
+//         if(pivotI < V && pivotJ < V) {
+//             shareDistInBlockPivot[threadIdx.x * getBlockSize + threadIdx.y] = graph[pivotI*V+pivotJ];
+//         }
+//         else {
+//             shareDistInBlockPivot[threadIdx.x * getBlockSize + threadIdx.y] = INF;
+//         }
+
+//         if(targetI < V && targetJ < V) {
+//             shareDistInBlockOther[threadIdx.x * getBlockSize + threadIdx.y] = graph[targetI*V+targetJ];
+//         }
+//         else {
+//             shareDistInBlockOther[threadIdx.x * getBlockSize + threadIdx.y] = INF;
+//         }
+//         __syncthreads();
+//         if(targetI < V && targetJ < V) {
+//             for(int k=0; k<getBlockSize; k++) {
+//                 if(shareDistInBlockOther[threadIdx.x * getBlockSize + threadIdx.y] > shareDistInBlockPivot[threadIdx.x*getBlockSize + k] + shareDistInBlockOther[k*getBlockSize + threadIdx.y]) {
+//                     shareDistInBlockOther[threadIdx.x * getBlockSize + threadIdx.y] = shareDistInBlockPivot[threadIdx.x*getBlockSize + k] + shareDistInBlockOther[k*getBlockSize + threadIdx.y];
+//                 }
+//             }
+//             graph[targetI*V+targetJ] = shareDistInBlockOther[threadIdx.x*getBlockSize+threadIdx.y];
+//         }
+//     }
+// }
+
+// __global__ void blockedASAPPhase2Col(int round, int* graph, int V, int blockSize) {
+//     if(blockIdx.x != round) {
+//         __shared__ int shareDistInBlockPivot[32*32];
+//         __shared__ int shareDistInBlockOther[32*32];
+//         int getBlockSize = blockSize;
+//         int pivotI = getBlockSize * round + threadIdx.x;
+//         int pivotJ = getBlockSize * round + threadIdx.y;
+//         int targetI = blockIdx.x * getBlockSize + threadIdx.x;
+//         int targetJ = pivotJ;
+
+//         if(pivotI < V && pivotJ < V) {
+//             shareDistInBlockPivot[threadIdx.x * getBlockSize + threadIdx.y] = graph[pivotI*V+pivotJ];
+//         }
+//         else {
+//             shareDistInBlockPivot[threadIdx.x * getBlockSize + threadIdx.y] = INF;
+//         }
+
+//         if(targetI < V && targetJ < V) {
+//             shareDistInBlockOther[threadIdx.x * getBlockSize + threadIdx.y] = graph[targetI*V+targetJ];
+//         }
+//         else {
+//             shareDistInBlockOther[threadIdx.x * getBlockSize + threadIdx.y] = INF;
+//         }
+//         __syncthreads();
+//         if(targetI < V && targetJ < V) {
+//             for(int k=0; k<getBlockSize; k++) {
+//                 if(shareDistInBlockOther[threadIdx.x * getBlockSize + threadIdx.y] > shareDistInBlockOther[threadIdx.x*getBlockSize + k] + shareDistInBlockPivot[k*getBlockSize + threadIdx.y]) {
+//                     shareDistInBlockOther[threadIdx.x * getBlockSize + threadIdx.y] = shareDistInBlockOther[threadIdx.x*getBlockSize + k] + shareDistInBlockPivot[k*getBlockSize + threadIdx.y];
+//                 }
+//             }
+//             graph[targetI*V+targetJ] = shareDistInBlockOther[threadIdx.x*getBlockSize+threadIdx.y];
+//         }
+//     }
+// }
+
+__global__ void blockedASAPPhase2(int round, int* graph, int V, int blockSize) {
+    if(blockIdx.x != round) {
+
+
+        __shared__ int shareDistInBlockPivot[64*64];
+        __shared__ int shareDistInBlockOtherRow[64*64];
+        __shared__ int shareDistInBlockOtherCol[64*64];
+        int getBlockSize = blockSize;
+        int x = threadIdx.x * 2;
+        int y = threadIdx.y * 2;
+        int pivotI = getBlockSize * round + y;
+        int pivotJ = getBlockSize * round + x;
+        int targetIRow = pivotI;
+        int targetJRow = blockIdx.x * getBlockSize + x;
+        int targetICol = blockIdx.x * getBlockSize + y;
+        int targetJCol = pivotJ;
+        shareDistInBlockPivot[y * getBlockSize + x] = graph[pivotI*V+pivotJ];
+        shareDistInBlockPivot[y * getBlockSize + x+1] = graph[pivotI*V+pivotJ+1];
+        shareDistInBlockPivot[(y+1) * getBlockSize + x] = graph[(pivotI+1)*V+pivotJ];
+        shareDistInBlockPivot[(y+1) * getBlockSize + x+1] = graph[(pivotI+1)*V+pivotJ+1];
+        shareDistInBlockOtherRow[y * getBlockSize + x] = graph[targetIRow*V+targetJRow];
+        shareDistInBlockOtherRow[y * getBlockSize + x+1] = graph[targetIRow*V+targetJRow+1];
+        shareDistInBlockOtherRow[(y+1) * getBlockSize + x] = graph[(targetIRow+1)*V+targetJRow];
+        shareDistInBlockOtherRow[(y+1) * getBlockSize + x+1] = graph[(targetIRow+1)*V+targetJRow+1];
+        shareDistInBlockOtherCol[y * getBlockSize + x] = graph[targetICol*V+targetJCol];
+        shareDistInBlockOtherCol[y * getBlockSize + x+1] = graph[targetICol*V+targetJCol+1];
+        shareDistInBlockOtherCol[(y+1) * getBlockSize + x] = graph[(targetICol+1)*V+targetJCol];
+        shareDistInBlockOtherCol[(y+1) * getBlockSize + x+1] = graph[(targetICol+1)*V+targetJCol+1];
+        __syncthreads();
+        for(int k=0; k<getBlockSize; k++) {
+            shareDistInBlockOtherRow[y * getBlockSize + x] = min(shareDistInBlockOtherRow[y * getBlockSize + x], shareDistInBlockPivot[y*getBlockSize + k] + shareDistInBlockOtherRow[k*getBlockSize + x]);
+            shareDistInBlockOtherRow[y * getBlockSize + x+1] = min(shareDistInBlockOtherRow[y * getBlockSize + x+1], shareDistInBlockPivot[y*getBlockSize + k] + shareDistInBlockOtherRow[k*getBlockSize + x+1]);
+            shareDistInBlockOtherRow[(y+1) * getBlockSize + x] = min(shareDistInBlockOtherRow[(y+1) * getBlockSize + x], shareDistInBlockPivot[(y+1)*getBlockSize + k] + shareDistInBlockOtherRow[k*getBlockSize + x]);
+            shareDistInBlockOtherRow[(y+1) * getBlockSize + x+1] = min(shareDistInBlockOtherRow[(y+1) * getBlockSize + x+1], shareDistInBlockPivot[(y+1)*getBlockSize + k] + shareDistInBlockOtherRow[k*getBlockSize + x+1]);
+            shareDistInBlockOtherCol[y * getBlockSize + x] = min(shareDistInBlockOtherCol[y * getBlockSize + x], shareDistInBlockOtherCol[y*getBlockSize + k] + shareDistInBlockPivot[k*getBlockSize + x]);
+            shareDistInBlockOtherCol[y * getBlockSize + x+1] = min(shareDistInBlockOtherCol[y * getBlockSize + x+1], shareDistInBlockOtherCol[y*getBlockSize + k] + shareDistInBlockPivot[k*getBlockSize + x+1]);
+            shareDistInBlockOtherCol[(y+1) * getBlockSize + x] = min(shareDistInBlockOtherCol[(y+1) * getBlockSize + x], shareDistInBlockOtherCol[(y+1)*getBlockSize + k] + shareDistInBlockPivot[k*getBlockSize + x]);
+            shareDistInBlockOtherCol[(y+1)* getBlockSize + x+1] = min(shareDistInBlockOtherCol[(y+1) * getBlockSize + x+1], shareDistInBlockOtherCol[(y+1)*getBlockSize + k] + shareDistInBlockPivot[k*getBlockSize + x+1]);
+        }
+        graph[targetIRow*V+targetJRow] = shareDistInBlockOtherRow[y*getBlockSize+x];
+        graph[targetIRow*V+targetJRow+1] = shareDistInBlockOtherRow[y*getBlockSize+x+1];
+        graph[(targetIRow+1)*V+targetJRow] = shareDistInBlockOtherRow[(y+1)*getBlockSize+x];
+        graph[(targetIRow+1)*V+targetJRow+1] = shareDistInBlockOtherRow[(y+1)*getBlockSize+x+1];
+        graph[targetICol*V+targetJCol] = shareDistInBlockOtherCol[y*getBlockSize+x];
+        graph[targetICol*V+targetJCol+1] = shareDistInBlockOtherCol[y*getBlockSize+x+1];
+        graph[(targetICol+1)*V+targetJCol] = shareDistInBlockOtherCol[(y+1)*getBlockSize+x];
+        graph[(targetICol+1)*V+targetJCol+1] = shareDistInBlockOtherCol[(y+1)*getBlockSize+x+1];
+        // __syncthreads();
+        // if(threadIdx.x==0 && threadIdx.y == 0){
+        //     printf("Phase2\n");
+        //     printf("Round = %d\n", round);
+        //     for(int i=0; i<5; i++) {
+        //         for(int j=0; j<5; j++) {
+        //             printf("%d ", graph[i*V+j]);
+        //         }
+        //         printf("\n");
+        //     }
+        // }
+        // printf("\n");
+    }
+}
+
+__global__ void blockedASAPPhase3(int round, int* graph, int V, int blockSize) {
+    if(blockIdx.x != round && blockIdx.y != round) {
+        
+        __shared__ int shareDistInBlockPivotRow[64*64];
+        __shared__ int shareDistInBlockPivotCol[64*64];
+        int getBlockSize = blockSize;
+        int x = threadIdx.x * 2;
+        int y = threadIdx.y * 2;
+        int pivotRowI = getBlockSize * round + y;
+        int pivotRowJ = blockIdx.y * getBlockSize + x;
+        int pivotColI = blockIdx.x * getBlockSize + y;
+        int pivotColJ = getBlockSize * round + x;
+        int pointUpdatedByThisThread1 = graph[ pivotColI*V + pivotRowJ];
+        int pointUpdatedByThisThread2 = graph[ pivotColI*V + pivotRowJ+1];
+        int pointUpdatedByThisThread3 = graph[ (pivotColI+1)*V + pivotRowJ];
+        int pointUpdatedByThisThread4 = graph[ (pivotColI+1)*V + pivotRowJ+1];
+        shareDistInBlockPivotRow[y * getBlockSize + x] = graph[pivotRowI*V+pivotRowJ];
+        shareDistInBlockPivotRow[y * getBlockSize + x+1] = graph[pivotRowI*V+pivotRowJ+1];
+        shareDistInBlockPivotRow[(y+1) * getBlockSize + x] = graph[(pivotRowI+1)*V+pivotRowJ];
+        shareDistInBlockPivotRow[(y+1) * getBlockSize + x+1] = graph[(pivotRowI+1)*V+pivotRowJ+1];
+        shareDistInBlockPivotCol[y * getBlockSize + x] = graph[pivotColI*V+pivotColJ];
+        shareDistInBlockPivotCol[y * getBlockSize + x+1] = graph[pivotColI*V+pivotColJ+1];
+        shareDistInBlockPivotCol[(y+1) * getBlockSize + x] = graph[(pivotColI+1)*V+pivotColJ];
+        shareDistInBlockPivotCol[(y+1) * getBlockSize + x+1] = graph[(pivotColI+1)*V+pivotColJ+1];
+        __syncthreads();
+        for(int k=0; k<getBlockSize; k++) {
+            pointUpdatedByThisThread1 = min(pointUpdatedByThisThread1, shareDistInBlockPivotCol[y*getBlockSize + k] + shareDistInBlockPivotRow[k*getBlockSize + x]);
+            pointUpdatedByThisThread2 = min(pointUpdatedByThisThread2, shareDistInBlockPivotCol[y*getBlockSize + k] + shareDistInBlockPivotRow[k*getBlockSize + x+1]);
+            pointUpdatedByThisThread3 = min(pointUpdatedByThisThread3, shareDistInBlockPivotCol[(y+1)*getBlockSize + k] + shareDistInBlockPivotRow[k*getBlockSize + x]);
+            pointUpdatedByThisThread4 = min(pointUpdatedByThisThread4, shareDistInBlockPivotCol[(y+1)*getBlockSize + k] + shareDistInBlockPivotRow[k*getBlockSize + x+1]);
+        }
+
+        graph[pivotColI*V + pivotRowJ] = pointUpdatedByThisThread1;
+        graph[pivotColI*V + pivotRowJ+1] = pointUpdatedByThisThread2;
+        graph[(pivotColI+1)*V + pivotRowJ] = pointUpdatedByThisThread3;
+        graph[(pivotColI+1)*V + pivotRowJ+1] = pointUpdatedByThisThread4;
+        // __syncthreads();
+        // if(threadIdx.x==0 && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0){
+        //     printf("Phase3\n");
+        //     printf("Round = %d\n", round);
+        //     for(int i=0; i<5; i++) {
+        //         for(int j=0; j<5; j++) {
+        //             printf("%d ", graph[i*V+j]);
+        //         }
+        //         printf("\n");
+        //     }
+        // }
+    }
+}
+
+int ceil(int a, int b) { return (a + b - 1) / b; }
+
+void block_FW() {
+    // printf("Initial!\n");
+    // for(int i=0; i<n; i++) {
+    //     for(int j=0; j<n; j++) {
+    //         printf("%d ", Dist[i*padN+j]);
+    //     }
+    //     printf("\n");
+    // }
+    // printf("\n");
+
+    // malloc space on gpu
+    int * deviceGraph;
+    deviceGraph = (int *)malloc(padN*padN*sizeof(int));
+    cudaHostRegister(Dist, padN*padN*sizeof(int), cudaHostRegisterDefault);
+    cudaMalloc(&deviceGraph, padN*padN*sizeof(int));
+    cudaMemcpy(deviceGraph, Dist,  padN*padN*sizeof(int), cudaMemcpyHostToDevice);
+
+    // initial parameter
+    int round = ceil(padN, floydWarshallBlockSize);
+    dim3 gridSize(1, 1);
+    dim3 gridSize2(round, 1);
+    dim3 gridSize3(round, round);
+    dim3 blockSize(32, 32);
+
+
+    for (int r = 0; r < round; ++r) {
+        // printf("%d %d\n", r, round);
+        // fflush(stdout);
+        /* Phase 1*/
+        // calculate diagonal axis block (upper left to down right)
+        blockedASAPPhase1<<<gridSize, blockSize>>> (r, deviceGraph, padN, floydWarshallBlockSize);
+
+        /* Phase 2*/
+        // calculate horizontal axis block
+        // blockedASAPPhase2Row<<<gridSize2, blockSize>>> (r, deviceGraph, n, 32);
+        // calculate vertical axis block
+        // blockedASAPPhase2Col<<<gridSize2, blockSize>>> (r, deviceGraph, n, 32);
+        blockedASAPPhase2<<<gridSize2, blockSize>>> (r, deviceGraph, padN, floydWarshallBlockSize);
+        /* Phase 3*/
+        blockedASAPPhase3<<<gridSize3, blockSize>>> (r, deviceGraph, padN, floydWarshallBlockSize);
+
+    }
+    cudaMemcpy(Dist, deviceGraph,  padN*padN*sizeof(int), cudaMemcpyDeviceToHost);   
+    cudaFree(deviceGraph);
+}
